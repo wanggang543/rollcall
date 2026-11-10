@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>點名簿產生器</title>
+<style>
+:root{--bg:#f6f5f1;--card:#fff;--tx:#222;--mu:#6b6b66;--bd:#d9d7cf;--ac:#2f6f5e;--act:#fff;--ye:#fff36b;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1c1b;--card:#262826;--tx:#ecebe6;--mu:#a3a29b;--bd:#3d3f3c;--ac:#5fb59d;--act:#10201b;--ye:#6b6411;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#1b1c1b;--card:#262826;--tx:#ecebe6;--mu:#a3a29b;--bd:#3d3f3c;--ac:#5fb59d;--act:#10201b;--ye:#6b6411;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.6 "PingFang TC","Microsoft JhengHei","Noto Sans TC",sans-serif}
+main{max-width:760px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:22px;margin:4px 0 2px}.sub{color:var(--mu);margin:0 0 18px}
+section{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:14px}
+h2{font-size:16px;margin:0 0 10px}h2 span{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--ac);color:var(--act);font-size:13px;margin-right:8px}
+textarea,input,select{font:inherit;color:var(--tx);background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:7px 10px;max-width:100%}
+textarea{width:100%;height:130px;resize:vertical}
+button{font:inherit;cursor:pointer;border:1px solid var(--ac);background:transparent;color:var(--ac);border-radius:8px;padding:7px 14px}
+button.p{background:var(--ac);color:var(--act)}button:disabled{opacity:.5;cursor:default}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}
+.mu{color:var(--mu);font-size:13px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--bd)}
+.tag{font-size:12px;padding:1px 8px;border-radius:10px;background:var(--ye);color:var(--tx);margin-right:6px}
+.x{border:0;padding:2px 8px;color:var(--mu)}
+#msg{min-height:22px;color:var(--ac)}
+</style>
+</head>
+<body>
+<main>
+<h1>📋 點名簿產生器</h1>
+<p class="sub">上傳學生名單，選擇月份，每個月份產生一份獨立的點名簿（含電話紀錄），每月 2 頁、可 A4 雙面列印，可下載 Word 或 PDF。</p>
+
+<section>
+<h2><span>1</span>學生名單</h2>
+<div class="row"><input type="file" id="file" accept=".xlsx,.xls,.csv,.txt"><span class="mu">支援 Excel、CSV、TXT</span><button id="tpl" style="margin-left:auto">下載範例檔 (xlsx)</button></div>
+<textarea id="list" placeholder="也可以直接貼上，每行一位，例如：&#10;1 王耀玄 男&#10;2 邱怡菲 女"></textarea>
+<div class="mu" id="cnt">尚未讀取名單（欄位順序不拘：座號、姓名、性別，座號與性別可省略）</div>
+<div class="row"><label>班級名稱（選填，會顯示在標題）<input id="cls" placeholder="例如：幼兒"></label></div>
+</section>
+
+<section>
+<h2><span>2</span>月份範圍</h2>
+<div class="row"><input type="month" id="ms"> <span>～</span> <input type="month" id="me"></div>
+<div class="mu">預設週一至週五上課，週六日放假（黃底）。</div>
+</section>
+
+<section>
+<h2><span>3</span>國定假日／補課</h2>
+<div class="row">
+<input type="date" id="hd"><input id="hl" placeholder="說明（例：雙十節補假一天）" style="flex:1;min-width:160px">
+<select id="ht"><option value="off">放假（平日停課）</option><option value="mk">補課（週末上課）</option></select>
+<button id="add" class="p">加入</button></div>
+<div class="row"><button id="pre">依所選月份載入國定假日</button><span class="mu">依法定日期與補假規則推算（含除夕至初三），更改月份範圍會自動更新；政府臨時調整與寒暑假請自行增修</span></div>
+<div id="hols"></div>
+</section>
+
+<section>
+<h2><span>4</span>輸出</h2>
+<div class="row">
+<label><input type="radio" name="f" value="docx" checked> Word (.docx)</label>
+<label><input type="radio" name="f" value="pdf"> PDF</label>
+<button id="zip" class="p" style="margin-left:auto">全部打包下載 ZIP</button></div>
+<div id="msg"></div>
+<div id="months"></div>
+</section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+const $=id=>document.getElementById(id),p2=n=>String(n).padStart(2,'0');
+const WK='日一二三四五六',CM=['','一','二','三','四','五','六','七','八','九','十','十一','十二'];
+const FONT='"DFKai-SB","標楷體","Kaiti TC","BiauKai","Noto Serif TC","PingFang TC","Microsoft JhengHei",sans-serif';
+let students=[],hols=[],dl=null,busy=false;
+let auto=false;
+function twHolidays(y0,y1){
+  const K=d=>`${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`,M=new Map(),L=[];
+  let lf=null;try{lf=new Intl.DateTimeFormat('en-u-ca-chinese',{month:'numeric',day:'numeric'})}catch(e){}
+  const lun=d=>{const q={};lf.formatToParts(d).forEach(p=>q[p.type]=p.value);return/bis/.test(q.month)?[0,0]:[+q.month,+q.day]};
+  for(let y=y0;y<=y1+1;y++){
+    const yy=y%100,qm=Math.floor(yy*.2422+4.81)-Math.floor(yy/4);
+    const fx=[[1,1,'元旦'],[2,28,'和平紀念日'],[10,10,'雙十節國慶日'],[10,25,'台灣光復暨金門古寧頭大捷紀念日'],[12,25,'行憲紀念日']];
+    if(qm==4)fx.push([4,4,'兒童節暨民族掃墓節']);else fx.push([4,4,'兒童節'],[4,qm,'民族掃墓節']);
+    fx.forEach(([m,d,n])=>L.push({d:new Date(y,m-1,d,12),n,s:1}));
+    L.push({d:new Date(y,4,1,12),n:'勞動節',s:0});
+    if(lf)for(let t=new Date(y,0,1,12);t.getFullYear()==y;t.setDate(t.getDate()+1)){
+      const[m,d]=lun(t),c=new Date(t);
+      if(m==5&&d==5)L.push({d:c,n:'端午節',s:1});
+      else if(m==8&&d==15)L.push({d:c,n:'中秋節',s:1});
+      else if(m==1&&d<=3)L.push({d:c,n:'春節',s:0});
+      else{const nx=new Date(t);nx.setDate(nx.getDate()+1);const[m2,d2]=lun(nx);if(m2==1&&d2==1)L.push({d:c,n:'農曆除夕',s:0})}
+    }
+  }
+  const wk=x=>x.d.getDay()%6!=0;
+  L.filter(wk).forEach(x=>{const k=K(x.d);if(!M.has(k))M.set(k,x.n)});
+  L.filter(x=>!wk(x)&&x.s).sort((a,b)=>a.d-b.d).forEach(x=>{const t=new Date(x.d),st=x.d.getDay()==6?-1:1;do{t.setDate(t.getDate()+st)}while(M.has(K(t)));M.set(K(t),x.n+'補假一天')});
+  return M;
+}
+function loadHols(){
+  const a=$('ms').value,b=$('me').value;if(!a||!b)return;
+  const y0=+a.slice(0,4),y1=+b.slice(0,4),lo=a+'-01',hi=b+'-31';
+  hols=hols.filter(h=>!h.auto);
+  twHolidays(y0,y1).forEach((l,d)=>{if(d>=lo&&d<=hi&&!hols.some(h=>h.d==d))hols.push({d,l,t:'off',auto:1})});
+  auto=true;
+}
+const now=new Date();$('ms').value=$('me').value=now.getFullYear()+'-'+p2(now.getMonth()+1);
+const msg=t=>$('msg').textContent=t||'';
+
+/* ---------- 名單 ---------- */
+function parse(){
+  const out=[];
+  for(const line of $('list').value.split(/\r?\n/)){
+    const cs=line.split(/[\t,，\s]+/).map(s=>s.trim()).filter(Boolean);
+    if(!cs.length||cs.includes('姓名'))continue;
+    let no='',name='',g='';
+    for(const c of cs){if(/^[男女]$/.test(c))g=c;else if(/^\d+$/.test(c)&&!no)no=c;else if(!name)name=c}
+    if(name)out.push({no,name,g});
+  }
+  const sl=Array.from({length:24},(_,i)=>({no:String(i+1),name:'',g:''})),rest=[];
+  out.forEach(s=>{const n=+s.no;if(n>=1&&n<=24&&!sl[n-1].name)Object.assign(sl[n-1],{name:s.name,g:s.g});else rest.push(s)});
+  let over=0;rest.forEach(s=>{const f=sl.find(x=>!x.name);if(f){f.name=s.name;f.g=s.g}else over++});
+  students=sl;const nm=sl.filter(s=>s.name);
+  $('cnt').textContent=nm.length?`已讀取 ${nm.length} 位：${nm.slice(0,6).map(s=>s.name).join('、')}${nm.length>6?'…':''}${over?`（超過 24 人，${over} 位未列入）`:''}`:'尚未讀取名單（一班最多 24 人，沒有姓名的座號仍會保留空白欄位）';
+  render();
+}
+$('list').oninput=parse;
+$('file').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  try{
+    const buf=await f.arrayBuffer();let rows;
+    if(/\.(xlsx|xls)$/i.test(f.name)){const wb=XLSX.read(buf);rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false}).map(r=>r.join('\t'));}
+    else{let t;try{t=new TextDecoder('utf-8',{fatal:true}).decode(buf)}catch(_){t=new TextDecoder('big5').decode(buf)}rows=t.replace(/^\uFEFF/,'').split(/\r?\n/);}
+    $('list').value=rows.join('\n');parse();
+  }catch(err){msg('無法讀取檔案：'+err.message)}
+};
+
+$('tpl').onclick=()=>{
+  const rows=[['座號','姓名','性別']];for(let i=1;i<=24;i++)rows.push([i,'','']);
+  const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=[{wch:8},{wch:14},{wch:8}];
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'工作表1');
+  save('點名簿範例檔.xlsx',XLSX.write(wb,{type:'array',bookType:'xlsx'}));
+};
+
+/* ---------- 假日 ---------- */
+function drawHols(){
+  hols.sort((a,b)=>a.d<b.d?-1:1);
+  $('hols').innerHTML=hols.map((h,i)=>`<div class="item"><span><span class="tag">${h.t=='mk'?'補課':'放假'}</span>${h.d}　${h.l||''}</span><button class="x" data-i="${i}">✕</button></div>`).join('');
+  $('hols').querySelectorAll('button').forEach(b=>b.onclick=()=>{hols.splice(+b.dataset.i,1);render()});
+}
+const addH=(d,l,t)=>{hols=hols.filter(h=>h.d!=d);hols.push({d,l,t})};
+$('add').onclick=()=>{if(!$('hd').value)return msg('請先選擇日期');msg();addH($('hd').value,$('hl').value.trim(),$('ht').value);$('hl').value='';render()};
+$('pre').onclick=()=>{loadHols();render()};
+
+/* ---------- 版面（Word 與 PDF 共用） ---------- */
+const C=(t,o)=>({t,s:1,...o});
+const days=(y,m)=>new Date(y,m,0).getDate();
+function isOff(y,m,d){const w=new Date(y,m-1,d).getDay(),h=hols.find(x=>x.d==`${y}-${p2(m)}-${p2(d)}`);
+  const mk=h&&h.t=='mk';return{h,w,off:(h&&h.t=='off')||((w==0||w==6)&&!mk)}}
+function pagesOf(y,m){
+  const n=Math.ceil(students.length/30),per=Math.ceil(students.length/n),cls=$('cls').value.trim(),pages=[];
+  for(let k=0;k<n;k++){
+    const ch=students.slice(k*per,(k+1)*per),N=ch.length,DW=560,sw=Math.floor((10998-2*DW)/N);
+    const colW=[DW,DW,...Array(N).fill(sw)],R=[];
+    const nameH=Math.max(2,...ch.map(s=>[...s.name].length))*235+140;
+    R.push({h:230,c:[C('座號',{s:2,z:14}),...ch.map(s=>C(s.no,{z:14}))]});
+    R.push({h:nameH,c:[C('',{s:2,v:['姓','名'],z:22}),...ch.map(s=>C('',{v:s.name?[...s.name]:null,z:20}))]});
+    R.push({h:330,c:[C('性別',{s:2,z:22}),...ch.map(s=>C(s.g,{z:22}))]});
+    R.push({h:300,c:[C('日期',{z:14}),C('星期',{z:14}),C('',{s:N})]});
+    for(let d=1;d<=days(y,m);d++){
+      const{h,w,off}=isOff(y,m,d),o={z:18,col:off?'FF0000':'',fill:off?'FFFF00':''};
+      const c=[C(d,o),C(WK[w],o)];
+      if(off&&h&&h.l)c.push(C(h.l,{s:N,z:20,col:'FF0000',fill:'FFFF00'}));
+      else for(let i=0;i<N;i++)c.push(C('',{fill:off?'FFFF00':''}));
+      R.push({h:300,x:1,c});
+    }
+    const Rn=N+1,kk=2,l=Math.floor((Rn-2*kk)/2),sp=[kk,l,kk,Rn-2*kk-l];
+    const split=()=>sp.map(s=>C('',{s}));
+    for(let i=0;i<6;i++)R.push({h:340,c:[i?C('',{cont:1}):C('',{rs:6,v:['電','話','紀','錄'],z:22}),...split()]});
+    R.push({h:340,c:[C('說明',{rs:2,z:18}),C('  請假代號：病假【○】 事假【△】',{s:Rn,z:22,al:'l'})]});
+    R.push({h:340,c:[C('',{cont:1}),...split()]});
+    const t=(cls?cls+' ':'')+CM[m]+'月份 點名表'+(n>1?`（${k+1}/${n}）`:'');
+    pages.push({title:t,rows:R,colW});
+    const R2=[];for(let i=0;i<40;i++)R2.push({h:370,x:1,c:[i?C('',{cont:1}):C('',{rs:40,v:['電','話','紀','錄'],z:22}),...split()]});
+    pages.push({title:(cls?cls+' ':'')+CM[m]+'月份 電話紀錄',rows:R2,colW});
+  }
+  return pages;
+}
+
+/* ---------- Word ---------- */
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const RF='<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="標楷體"/>';
+const par=(t,o,jc)=>`<w:p><w:pPr><w:snapToGrid w:val="0"/><w:spacing w:before="0" w:after="0"/><w:jc w:val="${jc}"/><w:rPr><w:sz w:val="${o.z||20}"/></w:rPr></w:pPr>${t===''?'':`<w:r><w:rPr>${RF}${o.col?`<w:color w:val="${o.col}"/>`:''}<w:sz w:val="${o.z||20}"/></w:rPr><w:t xml:space="preserve">${esc(t)}</w:t></w:r>`}</w:p>`;
+const tc=(c,w)=>`<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${c.s>1?`<w:gridSpan w:val="${c.s}"/>`:''}${c.cont?'<w:vMerge/>':c.rs?'<w:vMerge w:val="restart"/>':''}${c.fill?`<w:shd w:val="clear" w:color="auto" w:fill="${c.fill}"/>`:''}<w:vAlign w:val="center"/></w:tcPr>${c.v?c.v.map(ch=>par(ch,c,'center')).join(''):par(c.t,c,c.al=='l'?'left':'center')}</w:tc>`;
+function tbl(rows,colW){
+  const tw=colW.reduce((a,b)=>a+b,0);
+  return `<w:tbl><w:tblPr><w:tblW w:w="${tw}" w:type="dxa"/><w:jc w:val="center"/><w:tblBorders>${['top','left','bottom','right','insideH','insideV'].map(k=>`<w:${k} w:val="single" w:sz="4" w:space="0" w:color="000000"/>`).join('')}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:left w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${colW.map(w=>`<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>${rows.map(r=>{let i=0;return `<w:tr><w:trPr><w:cantSplit/><w:trHeight w:val="${r.h}" w:hRule="${r.x?'exact':'atLeast'}"/></w:trPr>${r.c.map(c=>{const w=colW.slice(i,i+c.s).reduce((a,b)=>a+b,0);i+=c.s;return tc(c,w)}).join('')}</w:tr>`}).join('')}</w:tbl>`}
+async function docxBlob(pages){
+  let b='';
+  pages.forEach((pg,i)=>{b+=`<w:p><w:pPr>${i?'<w:pageBreakBefore/>':''}<w:spacing w:before="0" w:after="60"/><w:jc w:val="center"/></w:pPr><w:r><w:rPr>${RF}<w:sz w:val="28"/></w:rPr><w:t>${esc(pg.title)}</w:t></w:r></w:p>`+tbl(pg.rows,pg.colW)});
+  const doc=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${b}<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/><w:rPr><w:sz w:val="2"/></w:rPr></w:pPr></w:p><w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="454" w:right="454" w:bottom="454" w:left="454" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr></w:body></w:document>`;
+  const z=new JSZip();
+  z.file('[Content_Types].xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+  z.file('_rels/.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+  z.file('word/document.xml',doc);
+  return z.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+}
+
+/* ---------- PDF（以 300dpi 畫布繪製，確保中文字型正確） ---------- */
+const S=300/1440,PX=z=>z*2.0833;
+function drawPage(pg){
+  const cv=document.createElement('canvas');cv.width=2480;cv.height=3508;
+  const x=cv.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,2480,3508);
+  x.textAlign='center';x.textBaseline='middle';x.lineWidth=2;x.strokeStyle='#000';
+  x.fillStyle='#000';x.font=`${PX(28)}px ${FONT}`;x.fillText(pg.title,1240,(454+280)*S);
+  const tw=pg.colW.reduce((a,b)=>a+b,0),x0=(11906-tw)/2,xs=[x0];
+  pg.colW.forEach(w=>xs.push(xs[xs.length-1]+w));
+  let y=454+560;const ys=[];
+  pg.rows.forEach(r=>{ys.push(y);y+=r.h});
+  pg.rows.forEach((r,ri)=>{let ci=0;
+    for(const c of r.c){
+      const a=xs[ci],b=xs[ci+c.s];ci+=c.s;if(c.cont)continue;
+      const hh=r.h+(c.rs?pg.rows.slice(ri+1,ri+c.rs).reduce((s,q)=>s+q.h,0):0);
+      const px=a*S,py=ys[ri]*S,w=(b-a)*S,h=hh*S;
+      if(c.fill){x.fillStyle='#'+c.fill;x.fillRect(px,py,w,h)}
+      x.strokeRect(px,py,w,h);
+      x.fillStyle=c.col?'#f00':'#000';x.font=`${PX(c.z||20)}px ${FONT}`;
+      if(c.v){const lh=PX(c.z||20)*1.15,y0=py+h/2-(c.v.length-1)*lh/2;c.v.forEach((ch,i)=>x.fillText(ch,px+w/2,y0+i*lh))}
+      else if(c.t!==''){if(c.al=='l'){x.textAlign='left';x.fillText(c.t,px+8,py+h/2);x.textAlign='center'}else x.fillText(String(c.t),px+w/2,py+h/2)}
+    }});
+  return new Promise(r=>cv.toBlob(async b=>r(new Uint8Array(await b.arrayBuffer())),'image/jpeg',.92));
+}
+async function pdfBlob(pages){
+  const js=[];for(const pg of pages)js.push(await drawPage(pg));
+  const enc=new TextEncoder(),parts=[],offs=[];let len=0;
+  const push=v=>{if(typeof v=='string')v=enc.encode(v);parts.push(v);len+=v.length};
+  const obj=(n,f)=>{offs[n]=len;push(n+' 0 obj\n');f();push('\nendobj\n')};
+  push('%PDF-1.4\n');
+  obj(1,()=>push('<</Type/Catalog/Pages 2 0 R>>'));
+  obj(2,()=>push(`<</Type/Pages/Kids[${js.map((_,i)=>(3+3*i)+' 0 R').join(' ')}]/Count ${js.length}>>`));
+  js.forEach((j,i)=>{const p=3+3*i,c='q 595.28 0 0 841.89 0 0 cm /I Do Q';
+    obj(p,()=>push(`<</Type/Page/Parent 2 0 R/MediaBox[0 0 595.28 841.89]/Resources<</XObject<</I ${p+2} 0 R>>>>/Contents ${p+1} 0 R>>`));
+    obj(p+1,()=>push(`<</Length ${c.length}>>\nstream\n${c}\nendstream`));
+    obj(p+2,()=>{push(`<</Type/XObject/Subtype/Image/Width 2480/Height 3508/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length ${j.length}>>\nstream\n`);push(j);push('\nendstream')});});
+  const n=3*js.length+3,xr=len;
+  push(`xref\n0 ${n}\n0000000000 65535 f \n`);
+  for(let i=1;i<n;i++)push(String(offs[i]).padStart(10,'0')+' 00000 n \n');
+  push(`trailer\n<</Size ${n}/Root 1 0 R>>\nstartxref\n${xr}\n%%EOF`);
+  return new Blob(parts,{type:'application/pdf'});
+}
+
+/* ---------- 月份清單與下載 ---------- */
+const fmt=()=>document.querySelector('input[name=f]:checked').value;
+function monthList(){
+  const[a,b]=[$('ms').value,$('me').value];if(!a||!b)return[];
+  let[y,m]=a.split('-').map(Number);const[ey,em]=b.split('-').map(Number),out=[];
+  while((y<ey||(y==ey&&m<=em))&&out.length<24){out.push([y,m]);if(++m>12){m=1;y++}}
+  return out;
+}
+const fname=(y,m)=>`${y-1911}年${m}月${$('cls').value.trim()}點名簿`;
+const build=(y,m)=>fmt()=='docx'?docxBlob(pagesOf(y,m)):pdfBlob(pagesOf(y,m));
+async function save(name,data){
+  if(!dl){const a=document.createElement('a');a.href=URL.createObjectURL(data instanceof Blob?data:new Blob([data]));a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),5000);return msg('已下載：'+name)}
+  try{await dl.save({filename:name,data});msg('已送出：'+name)}catch(e){if(e.code!='declined')msg('下載失敗：'+(e.message||e.code))}
+}
+function render(){
+  drawHols();
+  const ms=monthList();
+  $('months').innerHTML=ms.map(([y,m],i)=>{
+    let c=0;for(let d=1;d<=days(y,m);d++)if(!isOff(y,m,d).off)c++;
+    return `<div class="item"><span>${y-1911} 年 ${m} 月<span class="mu">　上課 ${c} 天</span></span><button data-i="${i}" class="one">下載</button></div>`}).join('')||'<div class="mu">請選擇月份範圍</div>';
+  $('months').querySelectorAll('.one').forEach(btn=>btn.onclick=async()=>{
+    if(!students.some(s=>s.name))return msg('請先提供學生名單');
+    const[y,m]=ms[+btn.dataset.i];busy=true;msg('產生中…');
+    try{await save(fname(y,m)+'.'+fmt(),await build(y,m))}catch(e){msg('產生失敗：'+e.message)}busy=false;
+  });
+  $('zip').disabled=!ms.length;
+}
+$('zip').onclick=async()=>{
+  if(!students.some(s=>s.name))return msg('請先提供學生名單');
+  const ms=monthList(),z=new JSZip();msg('產生中…');
+  try{
+    for(const[y,m]of ms)z.file(fname(y,m)+'.'+fmt(),await build(y,m));
+    const a=ms[0],b=ms[ms.length-1];
+    await save(`點名簿_${a[0]-1911}年${a[1]}月${ms.length>1?'-'+(b[0]-1911)+'年'+b[1]+'月':''}.zip`,await z.generateAsync({type:'blob'}));
+  }catch(e){msg('產生失敗：'+e.message)}
+};
+['ms','me'].forEach(i=>$(i).onchange=()=>{if(auto)loadHols();render()});$('cls').onchange=render;
+document.querySelectorAll('input[name=f]').forEach(r=>r.onchange=()=>msg());
+parse();
+(async()=>{try{dl=await claude.use('downloads')}catch(e){}})();
+</script>
+</body>
+</html>
