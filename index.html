@@ -262,7 +262,7 @@ function monthList(){
 const fname=(y,m)=>`${y-1911}年${m}月${$('cls').value.trim()}點名簿`;
 const build=(y,m)=>fmt()=='docx'?docxBlob(pagesOf(y,m)):pdfBlob(pagesOf(y,m));
 async function save(name,data){
-  if(!dl){const a=document.createElement('a');a.href=URL.createObjectURL(data instanceof Blob?data:new Blob([data]));a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),5000);return msg('已下載：'+name)}
+  if(!dl)return msg('此環境無法下載檔案，請在 claude.ai 中開啟此頁面。');
   try{await dl.save({filename:name,data});msg('已送出：'+name)}catch(e){if(e.code!='declined')msg('下載失敗：'+(e.message||e.code))}
 }
 function render(){
