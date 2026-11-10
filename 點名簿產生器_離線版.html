@@ -53,7 +53,7 @@ button.p{background:var(--ac);color:var(--act)}button:disabled{opacity:.5;cursor
 <input type="date" id="hd"><input id="hl" placeholder="說明（例：雙十節補假一天）" style="flex:1;min-width:160px">
 <select id="ht"><option value="off">放假（平日停課）</option><option value="mk">補課（週末上課）</option></select>
 <button id="add" class="p">加入</button></div>
-<div class="row"><button id="pre">依所選月份載入國定假日</button><span class="mu">依法定日期與補假規則推算（含除夕至初三），更改月份範圍會自動更新；政府臨時調整與寒暑假請自行增修</span></div>
+<div class="row"><button id="net" class="p">從網路取得官方日曆（需連網）</button><button id="pre">依規則推算國定假日（離線可用）</button><span class="mu">官方日曆來自社群整理的政府公告資料（含補班日），取得失敗或該年尚無資料時，請改用規則推算；更改月份範圍會自動更新，寒暑假與校內停課請自行增修</span></div>
 <div id="hols"></div>
 </section>
 
@@ -88,27 +88,49 @@ const FONT='"DFKai-SB","標楷體","Kaiti TC","BiauKai","Noto Serif TC","PingFan
 let students=[],hols=[],dl=null,busy=false;
 let auto=false;
 function twHolidays(y0,y1){
-  const K=d=>`${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`,M=new Map(),L=[];
+  const K=d=>`${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`,M=new Map(),L=[],SP=[],NY={2024:'0210',2025:'0129',2026:'0217',2027:'0206',2028:'0126',2029:'0213',2030:'0203',2031:'0123',2032:'0211',2033:'0131',2034:'0219',2035:'0208',2036:'0128',2037:'0215',2038:'0204',2039:'0124',2040:'0212'};
   let lf=null;try{lf=new Intl.DateTimeFormat('en-u-ca-chinese',{month:'numeric',day:'numeric'})}catch(e){}
   const lun=d=>{const q={};lf.formatToParts(d).forEach(p=>q[p.type]=p.value);return/bis/.test(q.month)?[0,0]:[+q.month,+q.day]};
   for(let y=y0;y<=y1+1;y++){
     const yy=y%100,qm=Math.floor(yy*.2422+4.81)-Math.floor(yy/4);
-    const fx=[[1,1,'元旦'],[2,28,'和平紀念日'],[10,10,'雙十節國慶日'],[10,25,'台灣光復暨金門古寧頭大捷紀念日'],[12,25,'行憲紀念日']];
+    const fx=[[1,1,'元旦'],[2,28,'和平紀念日'],[10,10,'雙十節國慶日'],[10,25,'台灣光復暨金門古寧頭大捷紀念日'],[12,25,'行憲紀念日'],[5,1,'勞動節'],[9,28,'教師節']];
     if(qm==4)fx.push([4,4,'兒童節暨民族掃墓節']);else fx.push([4,4,'兒童節'],[4,qm,'民族掃墓節']);
     fx.forEach(([m,d,n])=>L.push({d:new Date(y,m-1,d,12),n,s:1}));
-    L.push({d:new Date(y,4,1,12),n:'勞動節',s:0});
+    const sp=[];let ny=null;
     if(lf)for(let t=new Date(y,0,1,12);t.getFullYear()==y;t.setDate(t.getDate()+1)){
       const[m,d]=lun(t),c=new Date(t);
       if(m==5&&d==5)L.push({d:c,n:'端午節',s:1});
       else if(m==8&&d==15)L.push({d:c,n:'中秋節',s:1});
-      else if(m==1&&d<=3)L.push({d:c,n:'春節',s:0});
-      else{const nx=new Date(t);nx.setDate(nx.getDate()+1);const[m2,d2]=lun(nx);if(m2==1&&d2==1)L.push({d:c,n:'農曆除夕',s:0})}
+      else if(m==1&&d==1)ny=new Date(c);
     }
+    if(NY[y])ny=new Date(y,+NY[y].slice(0,2)-1,+NY[y].slice(2),12);
+    if(ny){const sh=k=>{const e=new Date(ny);e.setDate(e.getDate()+k);return e};
+      [[-2,'小年夜'],[-1,'農曆除夕'],[0,'春節'],[1,'春節'],[2,'春節']].forEach(([k,n])=>{const e=sh(k);L.push({d:e,n,s:0});sp.push(e)});
+      SP.push({t:sh(2),c:sp.filter(x=>x.getDay()%6==0).length})}
   }
   const wk=x=>x.d.getDay()%6!=0;
   L.filter(wk).forEach(x=>{const k=K(x.d);if(!M.has(k))M.set(k,x.n)});
+  SP.forEach(s=>{const t=new Date(s.t);for(let i=0;i<s.c;){t.setDate(t.getDate()+1);if(t.getDay()%6&&!M.has(K(t))){M.set(K(t),'春節補假一天');i++}}});
   L.filter(x=>!wk(x)&&x.s).sort((a,b)=>a.d-b.d).forEach(x=>{const t=new Date(x.d),st=x.d.getDay()==6?-1:1;do{t.setDate(t.getDate()+st)}while(M.has(K(t)));M.set(K(t),x.n+'補假一天')});
   return M;
+}
+async function fetchHols(){
+  const a=$('ms').value,b=$('me').value;if(!a||!b)return msg('請先選擇月份範圍');
+  const lo=a+'-01',hi=b+'-31',got=[],miss=[];
+  msg('取得中…');
+  for(let y=+a.slice(0,4);y<=+b.slice(0,4);y++){
+    try{const r=await fetch(`https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/data/${y}.json`);if(!r.ok)throw 0;const j=await r.json();if(!Array.isArray(j)||j.length<300)throw 0;got.push(...j)}catch(e){miss.push(y)}
+  }
+  if(!got.length)return msg(`無法取得 ${miss.join('、')} 年的官方日曆（可能尚未公告、沒有網路，或此環境不允許連線），請改用「依規則推算」。`);
+  hols=hols.filter(h=>!h.auto);let off=0,mk=0;
+  got.forEach(e=>{
+    const s=String(e.date),Y=+s.slice(0,4),M=+s.slice(4,6),D=+s.slice(6,8),d=`${Y}-${p2(M)}-${p2(D)}`,w=new Date(Y,M-1,D).getDay(),we=w==0||w==6;
+    if(d<lo||d>hi||hols.some(h=>h.d==d))return;
+    if(e.isHoliday&&!we){hols.push({d,l:e.description=='補假'?'補假一天':(e.description||'放假'),t:'off',auto:1});off++}
+    else if(!e.isHoliday&&we){hols.push({d,l:e.description||'補行上班',t:'mk',auto:1});mk++}
+  });
+  auto='net';
+  msg(`已取得官方日曆：放假 ${off} 天、補課 ${mk} 天${miss.length?`；${miss.join('、')} 年無資料`:''}。請與人事行政總處公告核對。`);
 }
 function loadHols(){
   const a=$('ms').value,b=$('me').value;if(!a||!b)return;
@@ -191,6 +213,7 @@ function drawHols(){
 const addH=(d,l,t)=>{hols=hols.filter(h=>h.d!=d);hols.push({d,l,t})};
 $('add').onclick=()=>{if(!$('hd').value)return msg('請先選擇日期');msg();addH($('hd').value,$('hl').value.trim(),$('ht').value);$('hl').value='';render()};
 $('pre').onclick=()=>{loadHols();render()};
+$('net').onclick=async()=>{await fetchHols();render()};
 
 /* ---------- 版面（Word 與 PDF 共用） ---------- */
 const C=(t,o)=>({t,s:1,...o});
@@ -325,7 +348,7 @@ $('zip').onclick=async()=>{
     await save(`點名簿_${a[0]-1911}年${a[1]}月${ms.length>1?'-'+(b[0]-1911)+'年'+b[1]+'月':''}.zip`,await z.generateAsync({type:'blob'}));
   }catch(e){msg('產生失敗：'+e.message)}
 };
-['ms','me'].forEach(i=>$(i).onchange=()=>{if(auto)loadHols();render()});$('cls').onchange=render;
+['ms','me'].forEach(i=>$(i).onchange=async()=>{if(auto=='net')await fetchHols();else if(auto)loadHols();render()});$('cls').onchange=render;
 document.querySelectorAll('input[name=f]').forEach(r=>r.onchange=()=>msg());
 parse();
 (async()=>{try{dl=await claude.use('downloads')}catch(e){}})();
